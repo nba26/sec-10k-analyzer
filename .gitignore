@@ -1,0 +1,23 @@
+# --- Secrets ---
+.env
+
+# --- Python virtual environment ---
+secenv/
+venv/
+.venv/
+
+# --- Generated / downloaded data (re-creatable, and large) ---
+sec_filings/
+chroma_db/
+
+# --- Python bytecode & caches ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- OS / editor cruft ---
+.DS_Store
+.vscode/
+.idea/

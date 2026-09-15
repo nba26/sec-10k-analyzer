@@ -1,0 +1,30 @@
+# --- LangChain core + current integration packages (2025/2026 structure) ---
+# LangChain was split into separate packages. We use the dedicated
+# integration packages instead of the deprecated `langchain.*` imports.
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+langchain-chroma>=0.1.4
+langchain-text-splitters>=0.3.0
+
+# --- LLM + embeddings provider ---
+openai>=1.40.0
+
+# --- Vector database (stores our embeddings locally) ---
+chromadb>=0.5.0
+
+# --- SEC EDGAR filing downloader + company lookup ---
+sec-edgar-downloader>=5.0.3
+requests>=2.31.0
+
+# --- HTML parsing (extract readable text from the 10-K) ---
+beautifulsoup4>=4.12.0
+
+# --- Token counting for chunking (matches how the embedding model sees text) ---
+tiktoken>=0.7.0
+
+# --- Web dashboard ---
+streamlit>=1.37.0
+
+# --- Load OpenAI API key from .env ---
+python-dotenv>=1.0.1
