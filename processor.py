@@ -54,6 +54,8 @@ RECOVERABLE_TITLES = {
         r"management['’` ]?s?\s*discussion\s*and\s*analysis",
         re.IGNORECASE,
     ),
+    # Uppercase only: in running text this phrase is a mention, not a heading.
+    "Item 8": re.compile(r"REPORT\s+OF\s+INDEPENDENT\s+REGISTERED\s+PUBLIC\s+ACCOUNTING\s+FIRM"),
 }
 
 # Banks that drop "Item N" still keep the statutory heading (Citi: "RISK FACTORS
@@ -146,6 +148,26 @@ def _is_crossref(text, match, tag) -> bool:
     ))
 
 
+INLINE_REF_RE = re.compile(
+    r"Items?\s+\d{1,2}\s?[A-C]?\s*"
+    r"(,\s*[\"“]|[\"“]|\s+of\s+(this|the)\b|\s+(under|in)\s+(the\s+)?heading)",
+    re.IGNORECASE,
+)
+REF_LEAD_IN_RE = re.compile(
+    r"((?<![\w/.])[a-z][a-z']*|\bSee|,)\s*(Part\s+[IVX]+\s*,?\s*)?[\"“]?\s*$"
+)
+
+
+def _is_inline_reference(text, match) -> bool:
+    """'Item 8, “Financial Statements…”', 'Item 1A of this Form 10-K' and
+    'refer to Part II, Item 7. …' point at a section from inside another one.
+    A reference continues a sentence, so it follows a lowercase word or a
+    comma; a real header follows a page number, a period or 'PART II'."""
+    if INLINE_REF_RE.match(text, match.start()):
+        return True
+    return bool(REF_LEAD_IN_RE.search(text[max(0, match.start() - 40): match.start()]))
+
+
 def _looks_like_section_open(text, match, tag) -> bool:
     after = _after_title(text, match, tag)
     return bool(re.match(
@@ -168,13 +190,7 @@ def _pick_starts(hits, text) -> dict[str, int]:
     size. If the max-gap winner is a cross-ref and an earlier occurrence already
     has a real body, keep the earlier one.
     """
-    starts = [m.start() for m in hits]
-    cands: dict[str, list[tuple[int, int, object]]] = {}
-    for i, match in enumerate(hits):
-        tag = _tag(match)
-        nxt = starts[i + 1] if i + 1 < len(starts) else len(text)
-        cands.setdefault(tag, []).append((nxt - match.start(), match.start(), match))
-
+    cands = _candidates(hits, text)
     chosen: dict[str, int] = {}
     for tag, opts in cands.items():
         winner = max(opts, key=lambda o: o[0])
@@ -190,6 +206,65 @@ def _pick_starts(hits, text) -> dict[str, int]:
                 winner = min(earlier, key=lambda o: o[1])
         chosen[tag] = winner[1]
     return chosen
+
+
+def _candidates(hits, text) -> dict[str, list[tuple[int, int, object]]]:
+    """Per item: (gap to the next header, start, match) for every occurrence."""
+    starts = [m.start() for m in hits]
+    cands: dict[str, list[tuple[int, int, object]]] = {}
+    for i, match in enumerate(hits):
+        nxt = starts[i + 1] if i + 1 < len(starts) else len(text)
+        cands.setdefault(_tag(match), []).append((nxt - match.start(), match.start(), match))
+    return cands
+
+
+def _in_order(chosen: list[tuple[int, str]], gap_at: dict[int, int]) -> set[str]:
+    """Items on the longest run whose ranks rise with position. Ties go to
+    the run that covers more text, so a TOC entry loses to the real header."""
+    ranks = [_item_rank(tag) for _, tag in chosen]
+    weight = [min(gap_at.get(start, 0), MIN_BODY) for start, _ in chosen]
+    best = [(1, w) for w in weight]
+    prev = [-1] * len(chosen)
+    for i in range(len(chosen)):
+        for j in range(i):
+            score = (best[j][0] + 1, best[j][1] + weight[i])
+            if ranks[j] < ranks[i] and score > best[i]:
+                best[i], prev[i] = score, j
+    i = max(range(len(chosen)), key=best.__getitem__, default=-1)
+    keep = set()
+    while i >= 0:
+        keep.add(chosen[i][1])
+        i = prev[i]
+    return keep
+
+
+def _repair_order(chosen: list[tuple[int, str]], hits, text) -> list[tuple[int, str]]:
+    """Items appear in a fixed order in a 10-K. A pick that lands out of
+    sequence is a reference or stray mention, so re-pick it from the
+    occurrences between its in-order neighbours, or drop it.
+
+    Exception: some filers put the financial statements after Part IV
+    (F-pages). A substantial key item sitting after everything else is kept.
+    """
+    cands = _candidates(hits, text)
+    gap_at = {o[1]: o[0] for opts in cands.values() for o in opts}
+    keep = _in_order(chosen, gap_at)
+    anchors = sorted((_item_rank(tag), start) for start, tag in chosen if tag in keep)
+    last_anchor = max(s for _, s in anchors)
+
+    repaired = [(start, tag) for start, tag in chosen if tag in keep]
+    for start, tag in chosen:
+        if tag in keep:
+            continue
+        rank = _item_rank(tag)
+        lo = max((s for r, s in anchors if r < rank), default=-1)
+        hi = min((s for r, s in anchors if r > rank), default=len(text))
+        inside = [o for o in cands.get(tag, []) if lo < o[1] < hi]
+        if inside:
+            repaired.append((max(inside, key=lambda o: o[0])[1], tag))
+        elif tag in KEY_ITEMS and start > last_anchor and gap_at.get(start, 0) >= MIN_BODY:
+            repaired.append((start, tag))
+    return sorted(repaired)
 
 
 def _item_rank(tag: str) -> tuple[int, str]:
@@ -284,13 +359,14 @@ def _looks_like_title_start(text: str, after: int) -> bool:
 
 
 def _segment_item_headers(text: str) -> dict[str, str]:
-    all_hits = list(ITEM_HEADER_RE.finditer(text))
+    all_hits = [m for m in ITEM_HEADER_RE.finditer(text) if not _is_inline_reference(text, m)]
     if not all_hits:
         return {}
 
     titled = [m for m in all_hits if _looks_like_heading(text, m, _tag(m))]
     hits = titled if len(titled) >= MIN_SECTIONS else all_hits
     chosen = sorted((start, tag) for tag, start in _pick_starts(hits, text).items())
+    chosen = _repair_order(chosen, hits, text)
     chosen = _recover_untitled(chosen, text)
     segments = _slice(chosen, text)
     return segments if len(segments) >= MIN_SECTIONS else {}

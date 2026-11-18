@@ -16,7 +16,7 @@ EMBED_BATCH = 256
 
 # Bump when the parser or chunking changes so old collections rebuild instead
 # of serving vectors that no longer match how the app reads them.
-INDEX_VERSION = 4
+INDEX_VERSION = 5
 
 
 class MissingAPIKey(RuntimeError):

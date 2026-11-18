@@ -125,6 +125,48 @@ def make_late_xref_1a():
     )
 
 
+def make_inline_refs():
+    """References that read like headers: Apple's 'Item 8, “…”' at the top of
+    a long Item 1A, Walmart's quoted refs, and Caterpillar's 'refer to Part
+    II, Item 7.' pointing at last year's 10-K."""
+    return (
+        "PART I Item 1. Business " + FILLER * 40
+        + "Item 1A. Risk Factors The following risks could hurt us. Read them "
+        "with Part II, Item 7, “Management's Discussion and Analysis of "
+        "Financial Condition and Results of Operations” and Item 8, “Financial "
+        "Statements and Supplementary Data” of this Form 10-K. "
+        "Macroeconomic risks matter. " + FILLER * 90
+        + "Item 1B. Unresolved Staff Comments None. "
+        + "Item 7. Management's Discussion and Analysis of Financial Condition "
+        "The following discussion covers the year. " + FILLER * 20
+        + "Risks are described herein in \" Item 1A. Risk Factors .\" "
+        + FILLER * 20
+        + "For 2023, refer to Part II, Item 7. Management's Discussion and "
+        "Analysis of Financial Condition and Results of Operations of the "
+        "Company's Annual Report on Form 10-K for 2024. " + FILLER * 40
+        + "Item 8. Financial Statements and Supplementary Data Consolidated "
+        "Statements of Operations. " + FILLER * 50
+        + "Item 9. Changes in and Disagreements with Accountants None. "
+    )
+
+
+def make_fpages():
+    """Item 8 is a pointer; the statements follow Part IV (Prologis)."""
+    return (
+        "Item 1. Business " + FILLER * 40
+        + "Item 1A. Risk Factors " + FILLER * 40
+        + "Item 7. Management's Discussion and Analysis of Financial Condition "
+        + FILLER * 40
+        + "Item 8. Financial Statements and Supplementary Data The statements "
+        "are listed in Item 15. "
+        + "Item 9. Changes in and Disagreements with Accountants None. "
+        + "Item 15. Exhibits, Financial Statement Schedules Listed below. "
+        + "Item 16. Form 10-K Summary None. "
+        + "REPORT OF INDEPENDENT REGISTERED PUBLIC ACCOUNTING FIRM To the "
+        "Board. " + FILLER * 60
+    )
+
+
 CASES = {
     "standard (periods, TOC)": make_filing(),
     "no periods in headers": make_filing(period=False),
@@ -184,6 +226,17 @@ xref = proc.segment_by_item(make_late_xref_1a())
 assert "sets forth the material risk factors" in xref["Item 1A"]
 assert not xref["Item 1A"].startswith("Item 1A: Risk Factors in this")
 print("late Item 1A cross-ref did not beat the real section: OK")
+
+refs = proc.segment_by_item(make_inline_refs())
+assert "Macroeconomic risks matter" in refs["Item 1A"], "inline 'Item 8, “…”' split Item 1A"
+assert refs["Item 7"].startswith("Item 7. Management's Discussion and Analysis of Financial Condition The following")
+assert "refer to Part II, Item 7" in refs["Item 7"], "prior-year reference became Item 7"
+assert refs["Item 8"].startswith("Item 8. Financial Statements and Supplementary Data Consolidated")
+print("inline references did not become headers: OK")
+
+fpages = proc.segment_by_item(make_fpages())
+assert fpages["Item 8"].startswith("REPORT OF INDEPENDENT"), "statements after Part IV not recovered"
+print("statements printed after Part IV recovered as Item 8: OK")
 
 assert proc.segment_by_item("nothing here") == {"Full Document": "nothing here"}
 assert "Full Document" in proc.segment_by_item("Item 1. Business " + FILLER)
