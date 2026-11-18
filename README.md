@@ -102,6 +102,33 @@ The three flagged tickers are known limits, not silent failures:
 
 The synthetic suite validates the parsing *logic* against failure modes designed in advance. The real-filer suite is what actually derisks a demo, and the gap between 8/8 and 9/12 is the honest measure of how far synthetic tests generalize to messy real documents.
 
+## Evaluation
+
+`eval_questions.json` holds 80 questions over four filings, picked because each uses a different layout: Apple (standard), JPMorgan (untitled MD&A), Citigroup (no "Item" labels), Wells Fargo (Exhibit 13). Per company there are 17 answerable questions (exact figures, explanations, and vague ones like "what is the biggest disclosed risk?") and 3 the system must refuse (stock price today, another company, voting advice).
+
+Labels are at the answer level. A retrieved chunk only counts as relevant if it contains a sentence or figure copied from the filing, not merely because it comes from the right item. A section-level label would have scored the "biggest risk" failure below as a hit.
+
+```bash
+python evaluate.py -v            # retrieval + answers, plain search vs. routed
+python evaluate.py --no-answers  # retrieval only, no chat calls
+```
+
+Results (routed is what the app runs: the opening chunks of the item a question maps to, plus the 6 nearest chunks):
+
+| Retrieval | Recall@6 | Context recall | MRR | False refusals | Answer accuracy | Must-refuse declined |
+| --------- | -------- | -------------- | --- | -------------- | --------------- | -------------------- |
+| Plain top-6 | 0.67 | 0.67 | 0.44 | 15% | 79% | 100% |
+| Routed      | 0.90 | 0.92 | 0.65 | 6%  | 93% | 100% |
+
+What the eval caught while it was being built:
+
+- **A mislabelled filing.** Apple's risk factors were indexed as Item 8 (see the parser section). The size-based parse check called it clean. After the fix, Apple's routed Recall@6 went from 0.78 to 0.92.
+- **A prompt regression.** A follow-up prompt added to stop false refusals on "biggest risk" questions also forced an answer to "What was Apple's revenue?" asked of JPMorgan's filing, and it answered with JPMorgan's numbers. The follow-up now keeps the refusal for other companies and unanswerable questions.
+
+Where it still fails (routed): four questions whose fact sits in a chunk that neither routing nor vector search returns (Citi's country count, Wells Fargo's asset cap, Apple's direct/indirect sales split, Citi's firm-wide operating expenses, where the model quoted a segment figure instead), and one where the right table was retrieved and the model still refused (Wells Fargo ROTCE).
+
+Answers are graded by string match against the expected figure, with millions restated as billions accepted. That is deterministic and cheap, but it cannot judge open-ended answers, which are only checked for not refusing. With 17 questions per company, one question moves a per-company score by 6 points, and repeated runs differ by a question or two.
+
 ## Grounding decisions
 
 - **The report is not fed back into Q&A.** An earlier version passed the summaries in as extra context. That let the model answer from its own prose while the sources still pointed at retrieved chunks, so a made-up figure looked sourced.
@@ -117,7 +144,7 @@ The synthetic suite validates the parsing *logic* against failure modes designed
 - Some tickers have no 10-K at all (new holding companies, foreign issuers that file a 20-F). That is an EDGAR gap, not a parse miss.
 - Only the single most recent 10-K per company. No year-over-year comparison.
 - Financial figures come from narrative text, not XBRL facts, so they inherit whatever the MD&A chose to state. The structured data in the filing's XBRL exhibits would be more reliable and is the obvious next step.
-- No evaluation set. Answer quality is assessed by reading, not measured.
+- The evaluation covers four filings and 80 questions. It is enough to compare retrieval strategies and catch regressions, not to claim an accuracy figure for 10-Ks in general.
 
 
 
@@ -129,6 +156,8 @@ processor.py      HTML cleaning, item segmentation, chunking
 vectorstore.py    Chroma persistence, indexing, coverage stats
 analyzer.py       Report generation and grounded Q&A
 app.py            Streamlit interface
+evaluate.py       Recall@6, MRR, refusal and accuracy scoring
+eval_questions.json  Labelled questions for AAPL, JPM, C, WFC
 test_parsing.py   Multi-ticker parser validation
 test_segmentation.py  Synthetic filings for the segmentation rules
 

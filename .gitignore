@@ -21,3 +21,7 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+# --- Eval run outputs (regenerate with evaluate.py --out) ---
+eval_results.json
+eval_before_parser.json

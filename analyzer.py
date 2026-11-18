@@ -182,12 +182,15 @@ def coverage(store) -> dict[str, dict]:
 QA_TMPL = """You are an analyst answering a question about {company}'s 10-K.
 Use ONLY the CONTEXT below, pulled from the filing. Do not use outside knowledge.
 
-Filings rarely rank items as "biggest" or "most important." If the question
-asks for that and the excerpt has no ranking, answer from the risks or facts
-the excerpt actually discusses and say that the filing does not single one out.
+Filings rarely rank items as "biggest" or "most important." Only if the
+question asks for such a ranking and the excerpt has none, answer from the
+risks or facts the excerpt discusses and say the filing does not single one
+out. Never add that remark to other questions.
 
-Reply exactly: "I couldn't find that in the filing." only when the context
-does not discuss the topic at all.
+Reply exactly: "I couldn't find that in the filing." when the context does not
+discuss the topic at all, when the question is about a company other than
+{company}, or when it asks for something a 10-K cannot contain, such as
+today's stock price, predictions, or personal advice.
 
 CONTEXT:
 {context}
@@ -198,12 +201,16 @@ ANSWER:"""
 
 NOT_FOUND = "I couldn't find that in the filing."
 
-QA_FOLLOWUP = """The CONTEXT is from {company}'s 10-K and does cover this topic.
+QA_FOLLOWUP = """The CONTEXT is from {company}'s 10-K.
 Question: {question}
 
-Answer from the context in 3-6 sentences. If the filing lists several risks
-or figures but does not rank them, say so and summarize the main ones it
-discusses. Do not say you could not find the answer.
+If the question is about a company other than {company}, or asks for
+something a 10-K cannot contain (today's stock price, predictions, personal
+advice), reply exactly: "I couldn't find that in the filing."
+
+Otherwise answer from the context in 3-6 sentences. If the filing lists
+several risks or figures but does not rank them, say so and summarize the
+main ones it discusses.
 
 CONTEXT:
 {context}
@@ -267,17 +274,22 @@ def _dedupe(docs: list[Document]) -> list[Document]:
     return out
 
 
-def ask_filing(symbol: str, question: str, store=None, k: int = 6) -> dict:
-    """Answer from retrieved chunks only.
+def retrieve(store, question: str, k: int = 6, routed: bool = True) -> tuple[list[Document], bool]:
+    """Chunks for a question, plus whether any were seeded by routing.
 
     Semantic search alone often misses the start of a long Item 1A, which is
     where filers list the principal risks. Questions that clearly map to an
     item get those opening chunks plus the nearest matches.
     """
-    store = store or open_collection(symbol)
-    seeded = _leading_chunks(store, _route(question))
+    seeded = _leading_chunks(store, _route(question)) if routed else []
     hits = store.similarity_search(question, k=k)
-    docs = _dedupe(seeded + hits)
+    return _dedupe(seeded + hits), bool(seeded)
+
+
+def ask_filing(symbol: str, question: str, store=None, k: int = 6, routed: bool = True) -> dict:
+    """Answer from retrieved chunks only."""
+    store = store or open_collection(symbol)
+    docs, seeded = retrieve(store, question, k=k, routed=routed)
 
     if not docs:
         return {"answer": NOT_FOUND, "sources": []}
