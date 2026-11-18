@@ -2,6 +2,16 @@
 
 Retrieval-augmented analysis of SEC annual reports. Pulls a company's most recent 10-K from EDGAR, splits it into its statutory items, embeds it locally, and answers questions using only what the filing says.
 
+## Demo
+
+![Answer to "What are Apple's main risk factors?" citing Item 1A](images/answer_with_citations.png)
+
+*A question about Apple's 10-K, answered from the filing with the source item (Item 1A) cited.*
+
+![Refusal for "What is Apple's stock price today?"](images/refusal.png)
+
+*A question the filing can't answer (today's stock price) is declined instead of guessed.*
+
 ## What it does
 
 - Downloads the latest 10-K for any EDGAR filer by ticker, name, or CIK
